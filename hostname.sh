@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Check if running as root
+# Ensure the script is running as root
 if [ "$EUID" -ne 0 ]; then
     echo "Please run as root"
     exit 1
 fi
 
-# Ask for new hostname
+# Prompt for the new hostname
 read -p "Enter new hostname: " NEW_HOSTNAME
 
 # Validate input is not empty
@@ -15,36 +15,41 @@ if [ -z "$NEW_HOSTNAME" ]; then
     exit 1
 fi
 
-# Set the hostname
+# Set the hostname using hostnamectl
 hostnamectl set-hostname "$NEW_HOSTNAME"
+if [ $? -ne 0 ]; then
+    echo "Failed to set hostname. Exiting."
+    exit 1
+fi
 
-# Check if /etc/hosts exists
+# Update /etc/hosts file
 if [ ! -f /etc/hosts ]; then
-    # Create new hosts file if it doesn't exist
-    echo -e "127.0.0.1\tlocalhost\n127.0.1.1\t$NEW_HOSTNAME" > /etc/hosts
-    echo "Created new hosts file with entries"
+    # Create a new /etc/hosts file if it doesn't exist
+    cat <<EOF > /etc/hosts
+127.0.0.1	localhost
+127.0.1.1	$NEW_HOSTNAME
+EOF
+    echo "Created new hosts file with entries."
 else
-    # Check if 127.0.1.1 entry exists
+    # Update or add the 127.0.1.1 entry
     if grep -q "^127.0.1.1" /etc/hosts; then
-        # Modify existing entry
         sed -i "s/^127.0.1.1.*$/127.0.1.1\t$NEW_HOSTNAME/" /etc/hosts
-        echo "Modified existing hosts entry"
+        echo "Modified existing 127.0.1.1 entry in hosts file."
     else
-        # Add new entry if it doesn't exist
         echo -e "127.0.1.1\t$NEW_HOSTNAME" >> /etc/hosts
-        echo "Added new hostname entry to hosts file"
+        echo "Added new 127.0.1.1 entry to hosts file."
     fi
 
-    # Check if localhost entry exists, add if missing
+    # Ensure the localhost entry exists; add it if missing
     if ! grep -q "^127.0.0.1.*localhost" /etc/hosts; then
         sed -i "1i127.0.0.1\tlocalhost" /etc/hosts
-        echo "Added localhost entry to hosts file"
+        echo "Added localhost entry to hosts file."
     fi
 fi
 
 echo "Hostname has been set to $NEW_HOSTNAME"
-echo "Current hosts file contents:"
+echo "Current /etc/hosts file contents:"
 cat /etc/hosts
 
-# Start new shell session to apply changes
+# Start a new shell session to apply changes
 exec bash
