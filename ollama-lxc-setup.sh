@@ -1,43 +1,42 @@
 #!/bin/bash
 set -e
 
-# Use already-downloaded template
-TEMPLATE_FILE="/var/lib/vz/template/cache/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"
+echo "[+] Updating container..."
+apt update && apt install -y curl sudo gnupg2 apt-transport-https ca-certificates software-properties-common
 
-# CONFIGURABLE PARAMETERS
-LXC_ID=190
-LXC_NAME=ollama
-MEM_MB=8192
-CORES=4
-DISK_GB=32
-BRIDGE="vmbr0"
-MODEL_NAME="mistral"
+echo "[+] Installing Docker..."
+curl -fsSL https://get.docker.com | sh
 
-echo "[+] Creating LXC container $LXC_NAME ($LXC_ID)..."
-pct create $LXC_ID "$TEMPLATE_FILE" \
-  --hostname $LXC_NAME \
-  --cores $CORES \
-  --memory $MEM_MB \
-  --rootfs local-lvm:${DISK_GB} \
-  --net0 name=eth0,bridge=$BRIDGE,ip=dhcp \
-  --unprivileged 0 \
-  --features nesting=1,keyctl=1,fuse=1 \
-  --ostype ubuntu \
-  --startup order=20 \
-  --onboot 1 \
-  --password ollama123 \
-  --nameserver 1.1.1.1
+echo "[+] Installing Ollama..."
+curl -fsSL https://ollama.com/install.sh | sh
 
-echo "[+] Starting container..."
-pct start $LXC_ID
-sleep 5
+echo "[+] Creating systemd service for Ollama..."
+cat <<EOF > /etc/systemd/system/ollama.service
+[Unit]
+Description=Ollama API Server
+After=network.target
 
-echo "[+] Running Ollama + WebUI install inside container..."
-pct exec $LXC_ID -- bash -c "$(curl -fsSL https://i.kalimi.net/ollama-cpu.sh)"
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+Restart=always
+User=root
 
-echo "[+] Pulling model: $MODEL_NAME..."
-pct exec $LXC_ID -- bash -c "ollama pull $MODEL_NAME"
+[Install]
+WantedBy=multi-user.target
+EOF
 
-IP=$(pct exec $LXC_ID -- hostname -I | awk '{print $1}')
-echo "[✅] Done! Access Open WebUI at: http://$IP:3000"
-echo "[i] LXC Login: pct console $LXC_ID  (password: ollama123)"
+systemctl daemon-reexec
+systemctl daemon-reload
+systemctl enable --now ollama
+
+echo "[+] Starting Open WebUI container..."
+docker run -d \
+  --name open-webui \
+  -p 3000:3000 \
+  -v open-webui-data:/app/backend/data \
+  -v /var/run/ollama:/var/run/ollama \
+  --add-host host.docker.internal:host-gateway \
+  --restart unless-stopped \
+  ghcr.io/open-webui/open-webui:main
+
+echo "[✅] Setup complete. Access Open WebUI on port 3000."
