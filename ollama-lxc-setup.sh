@@ -4,7 +4,7 @@ set -e
 # CONFIGURABLE SETTINGS
 LXC_ID=190
 LXC_NAME=ollama
-STORAGE_POOL="local-zfs"   # Change if your ZFS pool is named differently
+STORAGE_POOL="local-zfs"
 TEMPLATE_FILE="/var/lib/vz/template/cache/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"
 MEM_MB=8192
 CORES=4
@@ -31,9 +31,11 @@ echo "[+] Starting container..."
 pct start $LXC_ID
 sleep 5
 
-echo "[+] Installing Ollama + Open WebUI inside the container..."
-pct exec $LXC_ID -- bash -c '
+echo "[+] Uploading Ollama install script into container..."
+pct exec $LXC_ID -- bash -c "cat > /root/install-ollama.sh" <<'EOF'
+#!/bin/bash
 set -e
+
 apt update && apt install -y curl sudo gnupg2 ca-certificates apt-transport-https software-properties-common
 
 echo "[+] Installing Docker..."
@@ -43,7 +45,7 @@ echo "[+] Installing Ollama..."
 curl -fsSL https://ollama.com/install.sh | sh
 
 echo "[+] Creating Ollama systemd service..."
-cat <<EOF > /etc/systemd/system/ollama.service
+cat <<SERVICE > /etc/systemd/system/ollama.service
 [Unit]
 Description=Ollama API Server
 After=network.target
@@ -55,7 +57,7 @@ User=root
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SERVICE
 
 systemctl daemon-reexec
 systemctl daemon-reload
@@ -70,9 +72,12 @@ docker run -d \
   --add-host host.docker.internal:host-gateway \
   --restart unless-stopped \
   ghcr.io/open-webui/open-webui:main
-'
+EOF
 
-echo "[+] Pulling default model: $MODEL_NAME..."
+echo "[+] Executing setup script inside LXC..."
+pct exec $LXC_ID -- bash /root/install-ollama.sh
+
+echo "[+] Pulling model: $MODEL_NAME..."
 pct exec $LXC_ID -- bash -c "ollama pull $MODEL_NAME"
 
 IP=$(pct exec $LXC_ID -- hostname -I | awk '{print $1}')
